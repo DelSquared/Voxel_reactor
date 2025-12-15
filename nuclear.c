@@ -2,15 +2,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdbool.h>
 
 #define kB 0.0000015
 #define mag(x) sqrt(x[0]*x[0] + x[1]*x[1])
 
-
 typedef struct _Neutron Neutron;
 struct _Neutron {
-	float X[2];
-	float V[2];
+	float X[2]; 	// position 
+	float V[2]; 	// velocity
+	float L;	// to interaction 
 };
 
 void printN(Neutron n){
@@ -20,22 +21,24 @@ void printN(Neutron n){
 }
 
 void printNE(Neutron n[], int LEN_n){
-	printf("Ensamble:\n");
+	printf("Ensemble:\n");
 	for (int i = 0; i < LEN_n; i++){
 		printf("  ");
 		printN(n[i]);
 	}
 }
 
-void motion(Neutron* n, float dt){
-	n->X[0] += n->V[0]*dt;
-	n->X[1] += n->V[1]*dt;
+void move(Neutron* n){
+	float Vmag = mag(n->V);
+       	n->X[0] += n->L*n->V[0]/Vmag;
+       	n->X[1] += n->L*n->V[1]/Vmag;
 }
 
-void ensamble_motion(Neutron* n, int LEN_n, float dt){
-	for (int i=0; i<LEN_n; i++){
-		motion(&n[i], dt);
-	}
+void sample_inter_dist(Neutron* n, float s[], int LEN_s){
+	for (int i = 0; i < LEN_s; i++){
+        	n->L = -log(1-((float) rand()) / ((float) RAND_MAX))/s[i];
+        }
+	printf("%e\n",n->L);
 }
 
 void scatter(Neutron* n, float A, float T){ //elastic scattering
@@ -44,24 +47,17 @@ void scatter(Neutron* n, float A, float T){ //elastic scattering
 	float vt_dir = 2*M_PI*(float)rand()/(float)RAND_MAX;
 	float vt[2] = {vt_mag*cos(vt_dir), vt_mag*sin(vt_dir)};
 	float vcm[2] = {(vn[0] + A*vt[0]) / (A+1), (vn[1] + A*vt[1]) / (A+1)};
-
+	printf("x %f, y %f\n", n->V[0], n->V[1]);
 	float Vn[2] = {-vn[0] + 2*vcm[0], -vn[1] + 2*vcm[1]};
 	n->V[0] = Vn[0];
 	n->V[1] = Vn[1];
 }
 
-void ensamble_scatter(Neutron* n, int LEN_n, float A, float T){ //ensamble elastic scattering
+void ensemble_scatter(Neutron* n, int LEN_n, float A, float T){ //ensemble elastic scattering
 	for (int i=0; i<LEN_n; i++){
 		scatter(&n[i], A, T);
 	}
 }
-
-
-// interaction probability
-// microscopic cross-section s and number density N
-// macroscopic cross-section S = sN
-// probability of interaction at path of length L is P(L) = 1 - exp(-SL)
-// all that's required are a list of s and N, or just a table of S
 
 // event:
 // 	absorption:
@@ -71,6 +67,12 @@ void ensamble_scatter(Neutron* n, int LEN_n, float A, float T){ //ensamble elast
 // 		Elastic
 // 		Inelastic
 
+// TODO
+// 	radius of nucleus for fast neutrons R ~ 1e-15*A^0.3333
+// 	energy cross-section fit as s ~ pi*(R + h/(mv))^2
+// 	add target temp dependence as s(T) = s0 * sqrt(T0 / T)
+//	figure out a lookup table of cross-sections
+//	implement fission and absorption
 
 int main() {
 	
@@ -96,27 +98,32 @@ int main() {
 
 	printNE(ns, L_n);
 
-	ensamble_scatter(ns, L_n, 5, 500);
+	ensemble_scatter(ns, L_n, 5, 500);
 
 	printNE(ns, L_n);
 
-	ensamble_scatter(ns, L_n, 5, 500);
+	ensemble_scatter(ns, L_n, 5, 500);
 
 	printNE(ns, L_n);
 	
 	printf("==================\n");
-	Neutron n = {.X={0, 0}, .V={0, 20e6}};
+	
+	Neutron n = {.X={0, 0}, .V={0, 2e6}, .L=0};
 	printN(n);
 	FILE *fp = fopen("out.txt", "w");
 	if (!fp) printf("NO FILE");
-	fprintf(fp, "H,X,Y\n");
-	fprintf(fp, "%f,%e,%e\n", mag(n.V), n.X[0], n.X[1]);
-	for (int i = 0; i < 100; i++){
-		scatter(&n,238,300);
-		n.X[0] += n.V[0]*0.0001;
-		n.X[1] += n.V[1]*0.0001;
-		fprintf(fp, "%f,%e,%e\n", mag(n.V), n.X[0], n.X[1]);
+	fprintf(fp, "H,X,Y,L\n");
+	float tmass = 238;
+	float T = 300;
+	float s_scat[1] = {5};
+	fprintf(fp, "%f,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L);
+	for (int i = 0; i < 1000000; i++){
+		sample_inter_dist(&n, s_scat, 1);
+		move(&n);
+		scatter(&n, tmass, T);
+		fprintf(fp, "%f,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L);
 	}
+	
 	fclose(fp);
 
 	printf("==================\n");
