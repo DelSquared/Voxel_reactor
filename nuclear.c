@@ -29,6 +29,18 @@ typedef struct {
 	bool alive;	// if false will stop tracking neutron and consider it absorbed
 } Neutron;
 
+typedef struct {
+	float A; 	// atomic mass
+	float N;	// atomic density
+	float s_scat;	// scattering cross-section
+	float s_abs_th;	// thermal absorption cross-section
+	float s_abs_f;	// fast absorption cross-section
+	float s_fis_th;	// thermal fission cross-section
+	float s_fis_f;	// fast fission cross-section
+	float nu_th;	// thermal neutron production
+	float nu_f;	// fast neutron production
+} Material;
+
 void printN(Neutron n){
 	printf("Neutron:\n");
 	printf("  X: %e, %e\n", n.X[0], n.X[1]);
@@ -86,6 +98,22 @@ void s_temp(float* s, int LEN_S, float T){
 	for (int i=0; i<LEN_S; i++) s[i] *= rootT0_T;
 }
 
+void step(Neutron* n, Material m, float T){
+	// calculate s_abs
+	float s[2];
+	s[SCATTER] = m.s_scat;
+	s[ABSORB] = s_a(*n, m.A, m.s_abs_th, m.s_abs_f);
+	// sample s
+	sample_inter_dist(n, s, 2);
+	// move
+	move(n);
+	// if not absorbed scatter
+	if (n->alive) {
+		scatter(n, m.A, T);
+	}
+	// else sample for fission event
+
+}
 
 // event:
 // 	absorption:
@@ -113,6 +141,7 @@ void s_temp(float* s, int LEN_S, float T){
 int main() {
 	
 	Neutron n = {.X={0, 0}, .V={0, 2e6}, .L=0, .alive=true, .id=genID()};
+	Material m = {.A=238, .s_scat=9, .s_abs_th=2, .s_abs_f=0.07};
 	printN(n);
 	FILE *fp = fopen("out.txt", "w");
 	if (!fp) printf("NO FILE");
@@ -121,7 +150,7 @@ int main() {
 	float T = 300;
 	int LEN_S = 2;
 	float s[LEN_S];
-	s[SCATTER] = 4;
+	s[SCATTER] = 9;
 	s[ABSORB] = s_a(n, A, 2, 0.07);
 	printf("%f, %f\n", s[0], s[1]);
 	fprintf(fp, "%f,%e,%e,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L, s[0], s[1]);
