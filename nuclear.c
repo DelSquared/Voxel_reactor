@@ -8,6 +8,7 @@
 #define kB 0.0000015
 #define mag(x) sqrt(x[0]*x[0] + x[1]*x[1])
 #define mag2(x) x[0]*x[0] + x[1]*x[1]
+#define lgst(x) 1/(1+exp(-x))
 
 int genID() {
 	static int num = 0; 
@@ -19,15 +20,14 @@ enum inter {
   ABSORB,
 };
 
-typedef struct _Neutron Neutron;
-struct _Neutron {
+typedef struct {
 	float X[2]; 	// position 
 	float V[2]; 	// velocity
 	float L;	// to interaction 
 	enum inter s;	// next interaction type
 	int id;		// identifier for the neutron (to enable reuse of destroyed neutrons by renaming)
 	bool alive;	// if false will stop tracking neutron and consider it absorbed
-};
+} Neutron;
 
 void printN(Neutron n){
 	printf("Neutron:\n");
@@ -36,16 +36,30 @@ void printN(Neutron n){
 }
 
 void move(Neutron* n){
-	float Vmag = mag(n->V);
-       	n->X[0] += n->L*n->V[0]/Vmag;
-       	n->X[1] += n->L*n->V[1]/Vmag;
+	if (n->alive){
+		float Vmag = mag(n->V);
+       		n->X[0] += n->L*n->V[0]/Vmag;
+       		n->X[1] += n->L*n->V[1]/Vmag;
+	}
+	if (n->s == ABSORB){
+		n->alive = false;
+	}
 }
 
 void sample_inter_dist(Neutron* n, float s[], int LEN_s){
+	float L = 1000000000;
+	float sample;
+	int reaction_type;
 	for (int i = 0; i < LEN_s; i++){
-        	n->L = -log(1-((float) rand()) / ((float) RAND_MAX))/s[i];
-		n->s = i;
+        	sample = -log(1-((float) rand()) / ((float) RAND_MAX))/s[i];
+		if (sample < L) {
+			L = sample;
+			reaction_type = i;
+		}
         }
+	n->L = L;
+	n->s = reaction_type;
+		//printf("%d %f\n", i, n->L);
 }
 
 void scatter(Neutron* n, float A, float T){ //elastic scattering
@@ -59,20 +73,11 @@ void scatter(Neutron* n, float A, float T){ //elastic scattering
 	n->V[1] = Vn[1];
 }
 
-float s_a(Neutron n, float A){
-	static const float a = 38;
-	static const float alfa = 0.12;
-	static const float b = 0.85;
-	static const float k1 = 0.07;
-	static const float k2 = 0.44;
-	
-	float A03 = pow(A, 0.333333333);
-	float K = k2*A03;
-	float e = sqrt(a + b*mag2(n.V)/2)-sqrt(mag2(n.V)/2);
-	float R = 1e-15*A03;
-	float L = 1/mag(n.V);
-
-	return 2*M_PI*(R+L)*(R+L)*(1 - alfa*cos(K*(e + k1*e*e)));
+float s_a(Neutron n, float A, float sref_t,  float sref_f){
+	float s_t = sref_t*0.158114/mag(n.V);
+	//float a = lgst(0.1*(mag(n.V) - sref_t*0.158114/sref_f));
+	//return s_t*(1-a) + sref_f*(a);
+	return fmax(s_t, sref_f);
 }
 
 void s_temp(float* s, int LEN_S, float T){
@@ -91,21 +96,19 @@ void s_temp(float* s, int LEN_S, float T){
 // 		Inelastic	constant cross-section but maybe sampled randomly afterwards (TBD)
 
 // TODO
-// 	radius of nucleus for fast neutrons R ~ 1e-15*A^0.3333
-// 	energy cross-section fit as s ~ pi*(R + h/(mv))^2 ~ pi*(1e-15*A^0.3333 + h/(mv))^2
 // 	add target temp dependence as s(T) = s0 * sqrt(T0 / T)
 //	figure out a lookup table of cross-sections
 //	implement fission and absorption
 //	Figure out nucleus temperature because it might be useful
 //	data needed: A, sf/sa, nu
 
-//Nucleus,	A,	Thermal ν, Fast ν, 	  Thermal Ratio (σf/σa), 	Fast Ratio (σf/σa)
-//Thorium-232,	232.04,	—,	   2.46,	  ~0.00,		        0.07
-//Uranium-233,	233.04,	2.50,	   2.65,	  0.920,		        0.94
-//Uranium-235,	235.04,	2.44,	   2.61,	  0.855,		        0.82
-//Uranium-238,	238.05,	—,	   2.82,	  ~0.00,		        0.15
-//Plutonium-239,239.05,	2.88,	   3.12,	  0.735,		        0.90
-//Plutonium-241,241.06,	2.95,	   3.14,	  0.737,		        0.91
+//Nucleus,	A,	Thermal ν, Fast ν, Thermal Ratio (σf/σa), Fast Ratio (σf/σa)
+//Thorium-232,	232.04,	—,	   2.46,   0.000,		  0.07
+//Uranium-233,	233.04,	2.50,	   2.65,   0.920,		  0.94
+//Uranium-235,	235.04,	2.44,	   2.61,   0.855,		  0.82
+//Uranium-238,	238.05,	—,	   2.82,   0.000,		  0.15
+//Plutonium-239,239.05,	2.88,	   3.12,   0.735,		  0.90
+//Plutonium-241,241.06,	2.95,	   3.14,   0.737,		  0.91
 
 int main() {
 	
@@ -113,25 +116,49 @@ int main() {
 	printN(n);
 	FILE *fp = fopen("out.txt", "w");
 	if (!fp) printf("NO FILE");
-	fprintf(fp, "H,X,Y,L\n");
+	fprintf(fp, "H,X,Y,L,s_s,s_a\n");
 	float A = 238;
 	float T = 300;
 	int LEN_S = 2;
 	float s[LEN_S];
-	s[0] = 5;
-	s[1] = s_a(n, A);
-	fprintf(fp, "%f,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L);
+	s[SCATTER] = 4;
+	s[ABSORB] = s_a(n, A, 2, 0.07);
+	printf("%f, %f\n", s[0], s[1]);
+	fprintf(fp, "%f,%e,%e,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L, s[0], s[1]);
 	for (int i = 0; i < 1000000; i++){
+		s[SCATTER] = 9;
+		s[ABSORB] = s_a(n, A, 2, 0.07);
 		sample_inter_dist(&n, s, LEN_S);
 		move(&n);
-		scatter(&n, A, T);
-		fprintf(fp, "%f,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L);
+		if (n.alive) {
+			fprintf(fp, "%f,%e,%e,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L, s[0], s[1]);
+			scatter(&n, A, T);
+		}
+		else{
+			break;
+			printf("dead at: %d\n", i);
+		}
 	}
 	
 	fclose(fp);
 
 	printf("==================\n");
-	
+
+	// to plot the absorption cross-section spectrum
+	FILE *fp2 = fopen("abs.txt", "w");
+	fprintf(fp2, "v,s\n");
+	for (int i = 0; i < 10000; i++){
+		n.V[0] = 0;
+		n.V[1] = (float)i*0.01;
+		fprintf(fp2, "%f,%e\n", (float)i*0.01, s_a(n, 235, 99, 0.09));
+	}
+	for (int i = 1; i < 10000000; i++){
+		n.V[0] = 0;
+		n.V[1] = (float)i*100;
+		fprintf(fp2, "%d,%e\n", i*100, s_a(n, 235, 99, 0.09));
+	}
+	fclose(fp2);
+
 	printf("Neutron struct size: %ld\n", sizeof(Neutron));
 
 
