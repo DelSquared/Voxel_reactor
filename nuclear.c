@@ -1,4 +1,3 @@
-// Header file for input output functions
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -27,6 +26,7 @@ typedef struct {
 	enum inter s;	// next interaction type
 	int id;		// identifier for the neutron (to enable reuse of destroyed neutrons by renaming)
 	bool alive;	// if false will stop tracking neutron and consider it absorbed
+	bool caused_fis;// if true it means it caused fission and then will revert to false 
 } Neutron;
 
 typedef struct {
@@ -45,6 +45,37 @@ void printN(Neutron n){
 	printf("Neutron:\n");
 	printf("  X: %e, %e\n", n.X[0], n.X[1]);
 	printf("  V: %e, %e\n", n.V[0], n.V[1]);
+}
+
+// basic dynammic array to manage future multiple neutrons
+// inspired from https://stackoverflow.com/questions/3536153/c-dynamically-growing-array
+
+typedef struct {
+	Neutron *array;
+	size_t used;
+	size_t size;
+} NeutronArray;
+
+void initArray(NeutronArray *a, size_t initialSize) {
+	a->array = malloc(initialSize * sizeof(Neutron));
+	a->used = 0;
+	a->size = initialSize;
+}
+
+void insertArray(NeutronArray *a, Neutron element) {
+	// a->used is the number of used entries, because a->array[a->used++] updates a->used only *after* the array has been accessed.
+	// Therefore a->used can go up to a->size 
+	if (a->used == a->size) {
+		a->size *= 2;
+		a->array = realloc(a->array, a->size * sizeof(Neutron));
+	}
+	a->array[a->used++] = element;
+}
+
+void freeArray(NeutronArray *a) {
+	free(a->array);
+	a->array = NULL;
+	a->used = a->size = 0;
 }
 
 void move(Neutron* n){
@@ -92,6 +123,14 @@ float s_a(Neutron n, float A, float sref_t,  float sref_f){
 	return fmax(s_t, sref_f);
 }
 
+void fission(Neutron* n, float sf_sa_th, float sf_sa_f){
+	float p = sf_sa_th*(mag2(n->V) < 1e6) + sf_sa_f*(mag2(n->V) >= 1e6);// will be kept simple for now, constant in thermal and constant in fast regimes
+	if (p > (float)rand()/(float)RAND_MAX){
+		n->alive = true;
+		n->caused_fis = true;
+	}
+}
+
 void s_temp(float* s, int LEN_S, float T){
 	static const float T0 = 300;
 	float rootT0_T = sqrt(T0/T);
@@ -112,6 +151,9 @@ void step(Neutron* n, Material m, float T){
 		scatter(n, m.A, T);
 	}
 	// else sample for fission event
+	else{
+		//fission(n, m.s_fis_th/m.s_abs_th, m.s_fis_f/m.s_abs_f);
+	}
 
 }
 
@@ -154,6 +196,7 @@ int main() {
 	s[ABSORB] = s_a(n, A, 2, 0.07);
 	printf("%f, %f\n", s[0], s[1]);
 	fprintf(fp, "%f,%e,%e,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L, s[0], s[1]);
+	/*
 	for (int i = 0; i < 1000000; i++){
 		s[SCATTER] = 9;
 		s[ABSORB] = s_a(n, A, 2, 0.07);
@@ -162,6 +205,17 @@ int main() {
 		if (n.alive) {
 			fprintf(fp, "%f,%e,%e,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L, s[0], s[1]);
 			scatter(&n, A, T);
+		}
+		else{
+			break;
+			printf("dead at: %d\n", i);
+		}
+	}
+	*/
+	for (int i = 0; i < 1000000; i++){
+		step(&n, m, T);
+		if (n.alive) {
+			fprintf(fp, "%f,%e,%e,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L, s[0], s[1]);
 		}
 		else{
 			break;
