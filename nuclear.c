@@ -72,6 +72,15 @@ void insertArray(NeutronArray *a, Neutron element) {
 	a->array[a->used++] = element;
 }
 
+bool allDead(NeutronArray *a){
+	bool check = true;
+	for (int i = 0; i < a->used; i++){
+		check = check && a->array[i].alive;
+		//printf("%d", check);
+	}
+	return !check;
+}
+
 void freeArray(NeutronArray *a) {
 	free(a->array);
 	a->array = NULL;
@@ -212,7 +221,7 @@ int main() {
 		}
 	}
 	*/
-	for (int i = 0; i < 1000000; i++){
+	for (int i = 0; i < 10000; i++){
 		step(&n, m, T);
 		if (n.alive) {
 			fprintf(fp, "%f,%e,%e,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L, s[0], s[1]);
@@ -226,8 +235,56 @@ int main() {
 	fclose(fp);
 
 	printf("==================\n");
+	
+	NeutronArray N;
+	Material M = {.A=12, .s_scat=5, .s_abs_th=0.002, .s_abs_f=0.00001};
+	int LEN_N = 10;
+	initArray(&N, LEN_N);
+	for (short i = 0; i < LEN_N; i++){
+		float ang = 2*M_PI*(float)rand()/(float)RAND_MAX;
+		Neutron _n = {.X={0, 0}, .V={2e6*cos(ang), 2e6*sin(ang)}, .L=0, .alive=true, .id=genID()};
+		insertArray(&N, _n);
+	}
+	FILE *fp3 = fopen("out2.txt", "w");
+	if (!fp3) printf("NO FILE");
+	for (short i = 0; i < LEN_N; i++){
+		if (i > 0) fprintf(fp3, ",");
+		fprintf(fp3, "X%d,Y%d", i, i);
+	}
+	fprintf(fp3, "\n");
+	for (short i = 0; i < LEN_N; i++){
+		if (i > 0) fprintf(fp3, ",");
+		fprintf(fp3, "%e,%e", N.array[i].X[0],  N.array[i].X[1]);
+	}
+	fprintf(fp3, "\n");
+
+	for (int j = 0; j < 1000; j++){
+		for (short i = 0; i < LEN_N; i++){
+			//printf("%d\n", i);
+			if (N.array[i].alive) {
+				step(&N.array[i], M, T);
+				if (i > 0) fprintf(fp3, ",");
+				fprintf(fp3, "%e,%e", N.array[i].X[0],  N.array[i].X[1]);
+			}
+			else{
+				printf("dead at: %d\n", i);
+			}
+		}
+		if (allDead(&N)) break;
+		fprintf(fp3, "\n");
+	}
+
+	
+	
+	
+	
+	
+	
+	fclose(fp3);
+	printf("==================\n");
 
 	// to plot the absorption cross-section spectrum
+	/*
 	FILE *fp2 = fopen("abs.txt", "w");
 	fprintf(fp2, "v,s\n");
 	for (int i = 0; i < 10000; i++){
@@ -243,7 +300,7 @@ int main() {
 	fclose(fp2);
 
 	printf("Neutron struct size: %ld\n", sizeof(Neutron));
-
+	*/
 
 	return 0;
 }
