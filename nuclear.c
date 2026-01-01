@@ -56,29 +56,67 @@ typedef struct {
 	size_t size;
 } NeutronArray;
 
-void initArray(NeutronArray *a, size_t initialSize) {
+void initArray(NeutronArray* a, size_t initialSize) {
 	a->array = malloc(initialSize * sizeof(Neutron));
 	a->used = 0;
 	a->size = initialSize;
 }
 
-void insertArray(NeutronArray *a, Neutron element) {
+void insertArray(NeutronArray* a, Neutron element) {
 	// a->used is the number of used entries, because a->array[a->used++] updates a->used only *after* the array has been accessed.
 	// Therefore a->used can go up to a->size 
 	if (a->used == a->size) {
-		a->size *= 2;
+		a->size += 1;
 		a->array = realloc(a->array, a->size * sizeof(Neutron));
 	}
 	a->array[a->used++] = element;
 }
 
-bool allDead(NeutronArray *a){
+bool allDead(NeutronArray* a){
 	bool check = true;
 	for (int i = 0; i < a->used; i++){
-		check = check && a->array[i].alive;
-		//printf("%d", check);
+		check = check || a->array[i].alive;
 	}
 	return !check;
+}
+
+int countAlive(NeutronArray* a){
+	int alive = 0;
+	for (int i = 0; i < a->used; i++){
+		alive += (int)a->array[i].alive;
+	}
+	return alive;
+}
+
+
+void fissileNeutrons(NeutronArray* a, Material m){
+	float v2, nu, ang;
+	for (int i = 0; i < a->used; i++){
+		v2 = mag2(a->array[i].V);
+		nu = m.nu_th*( v2 < 1e6 ) + m.nu_f*( v2 >= 1e6 );
+		if (a->array[i].caused_fis){
+			// reset velocity to MeV (placeholder value)
+			float vnew = 2e6/mag(a->array[i].V);
+			a->array[i].V[0] *= vnew;
+			a->array[i].V[1] *= vnew;
+			a->array[i].caused_fis = false;
+			nu -= 1;
+			//creates new neutron (a single one for now) and adds some velocity spread
+			for (float f = nu; f >=1; f-=1){
+				ang = 2*M_PI*(float)rand()/(float)RAND_MAX;
+				insertArray(a, a->array[i]); 
+				a->array[a->used-1].V[0] = 2e6*cos(ang);
+				a->array[a->used-1].V[1] = 2e6*sin(ang);
+			}
+			if (nu > (float)rand()/(float)RAND_MAX){
+				ang = 2*M_PI*(float)rand()/(float)RAND_MAX;
+				insertArray(a, a->array[i]); 
+				a->array[a->used-1].V[0] = 2e6*cos(ang);
+				a->array[a->used-1].V[1] = 2e6*sin(ang);
+			}
+		}
+	}
+	
 }
 
 void freeArray(NeutronArray *a) {
@@ -111,7 +149,6 @@ void sample_inter_dist(Neutron* n, float s[], int LEN_s){
         }
 	n->L = L;
 	n->s = reaction_type;
-		//printf("%d %f\n", i, n->L);
 }
 
 void scatter(Neutron* n, float A, float T){ //elastic scattering
@@ -127,8 +164,6 @@ void scatter(Neutron* n, float A, float T){ //elastic scattering
 
 float s_a(Neutron n, float A, float sref_t,  float sref_f){
 	float s_t = sref_t*0.158114/mag(n.V);
-	//float a = lgst(0.1*(mag(n.V) - sref_t*0.158114/sref_f));
-	//return s_t*(1-a) + sref_f*(a);
 	return fmax(s_t, sref_f);
 }
 
@@ -161,7 +196,7 @@ void step(Neutron* n, Material m, float T){
 	}
 	// else sample for fission event
 	else{
-		//fission(n, m.s_fis_th/m.s_abs_th, m.s_fis_f/m.s_abs_f);
+		if (m.s_fis_th > 0 || m.s_fis_f > 0) fission(n, m.s_fis_th/m.s_abs_th, m.s_fis_f/m.s_abs_f);
 	}
 
 }
@@ -205,22 +240,6 @@ int main() {
 	s[ABSORB] = s_a(n, A, 2, 0.07);
 	printf("%f, %f\n", s[0], s[1]);
 	fprintf(fp, "%f,%e,%e,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L, s[0], s[1]);
-	/*
-	for (int i = 0; i < 1000000; i++){
-		s[SCATTER] = 9;
-		s[ABSORB] = s_a(n, A, 2, 0.07);
-		sample_inter_dist(&n, s, LEN_S);
-		move(&n);
-		if (n.alive) {
-			fprintf(fp, "%f,%e,%e,%e,%e,%e\n", mag(n.V), n.X[0], n.X[1], n.L, s[0], s[1]);
-			scatter(&n, A, T);
-		}
-		else{
-			break;
-			printf("dead at: %d\n", i);
-		}
-	}
-	*/
 	for (int i = 0; i < 10000; i++){
 		step(&n, m, T);
 		if (n.alive) {
@@ -237,70 +256,52 @@ int main() {
 	printf("==================\n");
 	
 	NeutronArray N;
-	Material M = {.A=12, .s_scat=5, .s_abs_th=0.002, .s_abs_f=0.00001};
-	int LEN_N = 10;
-	initArray(&N, LEN_N);
+	Material M = {.A=235, .s_scat=9, .s_abs_th=683, .s_abs_f=1.09, .s_fis_th=583, .s_fis_f=1, .nu_th=2.44, .nu_f=2.61};
+	int LEN_N = 1;
+	int MAX_N = 10;
+	initArray(&N, LEN_N); //factor of 2 extra because might as well since the first fission event will trigger an array doubling event anyway
 	for (short i = 0; i < LEN_N; i++){
 		float ang = 2*M_PI*(float)rand()/(float)RAND_MAX;
-		Neutron _n = {.X={0, 0}, .V={2e6*cos(ang), 2e6*sin(ang)}, .L=0, .alive=true, .id=genID()};
+		Neutron _n = {.X={0, 0}, .V={2e6*cos(ang), 2e6*sin(ang)}, .L=0, .alive=true, .caused_fis=false, .id=genID()};
 		insertArray(&N, _n);
 	}
 	FILE *fp3 = fopen("out2.txt", "w");
 	if (!fp3) printf("NO FILE");
-	for (short i = 0; i < LEN_N; i++){
+	for (short i = 0; i < 2*MAX_N+3; i++){
 		if (i > 0) fprintf(fp3, ",");
 		fprintf(fp3, "X%d,Y%d", i, i);
 	}
 	fprintf(fp3, "\n");
-	for (short i = 0; i < LEN_N; i++){
+	for (short i = 0; i < N.used; i++){
 		if (i > 0) fprintf(fp3, ",");
 		fprintf(fp3, "%e,%e", N.array[i].X[0],  N.array[i].X[1]);
 	}
 	fprintf(fp3, "\n");
 
-	for (int j = 0; j < 1000; j++){
-		for (short i = 0; i < LEN_N; i++){
-			//printf("%d\n", i);
+	for (int j = 0; j < 100000; j++){
+		printf("number of neutrons: %d, (%ld)\n", countAlive(&N), N.used);
+		for (short i = 0; i < N.used; i++){
 			if (N.array[i].alive) {
-				step(&N.array[i], M, T);
+				if (N.array[i].caused_fis){
+					printf("Fission!\n");
+					fissileNeutrons(&N, M);
+				}
 				if (i > 0) fprintf(fp3, ",");
 				fprintf(fp3, "%e,%e", N.array[i].X[0],  N.array[i].X[1]);
-			}
-			else{
-				printf("dead at: %d\n", i);
+				step(&N.array[i], M, T);
 			}
 		}
-		if (allDead(&N)) break;
+		if (allDead(&N)) {
+			break;
+		}
+		if (N.used >= MAX_N) break;
 		fprintf(fp3, "\n");
 	}
 
 	
-	
-	
-	
-	
-	
 	fclose(fp3);
 	printf("==================\n");
 
-	// to plot the absorption cross-section spectrum
-	/*
-	FILE *fp2 = fopen("abs.txt", "w");
-	fprintf(fp2, "v,s\n");
-	for (int i = 0; i < 10000; i++){
-		n.V[0] = 0;
-		n.V[1] = (float)i*0.01;
-		fprintf(fp2, "%f,%e\n", (float)i*0.01, s_a(n, 235, 99, 0.09));
-	}
-	for (int i = 1; i < 10000000; i++){
-		n.V[0] = 0;
-		n.V[1] = (float)i*100;
-		fprintf(fp2, "%d,%e\n", i*100, s_a(n, 235, 99, 0.09));
-	}
-	fclose(fp2);
-
-	printf("Neutron struct size: %ld\n", sizeof(Neutron));
-	*/
 
 	return 0;
 }
