@@ -3,6 +3,10 @@
 #include <math.h>
 #include <stdbool.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #define NUM_INTER 3
 #define kB 0.0000015
 #define mag(x) sqrt(x[0]*x[0] + x[1]*x[1])
@@ -67,15 +71,22 @@ void initArray(NeutronArray* a, size_t initialSize) {
 void insertArray(NeutronArray* a, Neutron element) {
 	// a->used is the number of used entries, because a->array[a->used++] updates a->used only *after* the array has been accessed.
 	// Therefore a->used can go up to a->size 
+	// needs extra handling to replace "dead" neutrons before expanding the array to improve memory efficiency and avoid pointless reallocs.
 	if (a->used == a->size) {
-		a->size += 1;
+		a->size += 200 + (int)(a->size * 0.1);
 		a->array = realloc(a->array, a->size * sizeof(Neutron));
 	}
 	a->array[a->used++] = element;
 }
 
+void freeArray(NeutronArray* a) {
+	free(a->array);
+	a->array = NULL;
+	a->used = a->size = 0;
+}
+
 bool allDead(NeutronArray* a){
-	bool check = true;
+	bool check = false;
 	for (int i = 0; i < a->used; i++){
 		check = check || a->array[i].alive;
 	}
@@ -93,7 +104,8 @@ int countAlive(NeutronArray* a){
 
 void fissileNeutrons(NeutronArray* a, Material m){
 	float v2, nu, ang;
-	for (int i = 0; i < a->used; i++){
+	int N = a->used;
+	for (int i = 0; i < N; i++){
 		v2 = mag2(a->array[i].V);
 		nu = m.nu_th*( v2 < 1e6 ) + m.nu_f*( v2 >= 1e6 );
 		if (a->array[i].caused_fis){
@@ -121,11 +133,6 @@ void fissileNeutrons(NeutronArray* a, Material m){
 	
 }
 
-void freeArray(NeutronArray *a) {
-	free(a->array);
-	a->array = NULL;
-	a->used = a->size = 0;
-}
 
 void move(Neutron* n){
 	if (n->alive){

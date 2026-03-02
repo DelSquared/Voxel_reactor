@@ -3,13 +3,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include "nuclear.h"
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-
-
+#include "preserve.h"
 
 int main() {
 	Neutron n = {.X={0, 0}, .V={0, 2e6}, .L=0, .alive=true, .id=genID()};
@@ -43,37 +37,38 @@ int main() {
 	
 	NeutronArray N;
 	Material M = {.A=235, .s_scat=9, .s_abs_th=683, .s_abs_f=1.09, .s_fis_th=583, .s_fis_f=1, .nu_th=2.44, .nu_f=2.61};
-	int LEN_N = 1;
-	int MAX_N = 10;
+	int LEN_N = 500;
+	int MAX_N = 20000;
 	initArray(&N, LEN_N); //factor of 2 extra because might as well since the first fission event will trigger an array doubling event anyway
 	for (short i = 0; i < LEN_N; i++){
 		float ang = 2*M_PI*(float)rand()/(float)RAND_MAX;
 		Neutron _n = {.X={0, 0}, .V={2e6*cos(ang), 2e6*sin(ang)}, .L=0, .alive=true, .caused_fis=false, .id=genID()};
 		insertArray(&N, _n);
 	}
-	FILE *fp3 = fopen("out2.txt", "w");
-	if (!fp3) printf("NO FILE");
-	for (short i = 0; i < 2*MAX_N+3; i++){
-		if (i > 0) fprintf(fp3, ",");
-		fprintf(fp3, "X%d,Y%d", i, i);
-	}
-	fprintf(fp3, "\n");
-	for (short i = 0; i < N.used; i++){
-		if (i > 0) fprintf(fp3, ",");
-		fprintf(fp3, "%e,%e", N.array[i].X[0],  N.array[i].X[1]);
-	}
-	fprintf(fp3, "\n");
+	//FILE *fp3 = fopen("out2.txt", "w");
+	//if (!fp3) printf("NO FILE");
+	//for (short i = 0; i < 2*MAX_N+3; i++){
+		//if (i > 0) fprintf(fp3, ",");
+		//fprintf(fp3, "X%d,Y%d", i, i);
+//	}
+	//fprintf(fp3, "\n");
+	//for (short i = 0; i < N.used; i++){
+		//if (i > 0) fprintf(fp3, ",");
+		//fprintf(fp3, "%e,%e", N.array[i].X[0],  N.array[i].X[1]);
+//	}
+	//fprintf(fp3, "\n");
 
 	for (int j = 0; j < 100000; j++){
 		printf("number of neutrons: %d, (%ld)\n", countAlive(&N), (long)N.used);
-		for (short i = 0; i < N.used; i++){
+		fissileNeutrons(&N, M);
+		for (int i = 0; i < N.used; i++){
 			if (N.array[i].alive) {
-				if (N.array[i].caused_fis){
-					printf("Fission!\n");
-					fissileNeutrons(&N, M);
-				}
-				if (i > 0) fprintf(fp3, ",");
-				fprintf(fp3, "%e,%e", N.array[i].X[0],  N.array[i].X[1]);
+			//	if (N.array[i].caused_fis){
+			//		printf("Fission!\n");
+			//		fissileNeutrons(&N, M);
+		//}
+				//if (i > 0) fprintf(fp3, ",");
+				//fprintf(fp3, "%e,%e", N.array[i].X[0],  N.array[i].X[1]);
 				step(&N.array[i], M, T);
 			}
 		}
@@ -81,13 +76,11 @@ int main() {
 			break;
 		}
 		if (N.used >= MAX_N) break;
-		fprintf(fp3, "\n");
+		//fprintf(fp3, "\n");
 	}
 
 	
-	fclose(fp3);
-	printf("==================\n");
-
+	//fclose(fp3);
 
 	return 0;
 }
